@@ -38,6 +38,18 @@ async function run() {
       res.send(result);
     });
 
+    app.put('/foods/:id', async(req,res) =>{
+      const id = req.params.id;
+      const filter = {_id: new ObjectId(id)};
+      const updatedFood = req.body;
+      const options = {upsert: true};
+      const updateDoc = {
+        $set: updatedFood
+      }
+      const result = await foodCollection.updateOne(filter, updateDoc, options);
+      res.send(result);
+    })
+
        app.post('/foods', async (req, res) => {
       const newFood = req.body;
       const result = await foodCollection.insertOne(newFood);

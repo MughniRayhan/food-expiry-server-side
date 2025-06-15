@@ -31,6 +31,29 @@ async function run() {
       res.send(result);
     });
 
+    // search
+    app.get('/foods/search', async (req, res) => {
+  const { q } = req.query;
+  const query = q?.trim();
+
+  if (!query) {
+    return res.status(400).json({ error: 'Search query required' });
+  }
+  try {
+    const results = await foodCollection.find({
+      $or: [
+        { title: { $regex: query, $options: 'i' } },
+        { category: { $regex: query, $options: 'i' } }
+      ]
+    }).toArray();
+
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// food details
      app.get('/foods/:id', async (req, res) => {
       const id = req.params.id;
       const query = {_id: new ObjectId(id)};
@@ -38,6 +61,7 @@ async function run() {
       res.send(result);
     });
 
+  // update food
     app.put('/foods/:id', async(req,res) =>{
       const id = req.params.id;
       const filter = {_id: new ObjectId(id)};
@@ -49,7 +73,7 @@ async function run() {
       const result = await foodCollection.updateOne(filter, updateDoc, options);
       res.send(result);
     })
-
+// delete
      app.delete('/foods/:id', async (req, res) => {
       const id = req.params.id;
       const query = {_id: new ObjectId(id)};
@@ -57,6 +81,7 @@ async function run() {
       res.send(result);
     });
 
+    // create new food
        app.post('/foods', async (req, res) => {
       const newFood = req.body;
       const result = await foodCollection.insertOne(newFood);
@@ -103,8 +128,8 @@ app.get('/nearly-expiry', async(req,res)=>{
  })
  .sort({expirydate:1}).toArray();
  res.send(result);
-})
-    
+});
+
   } finally {
     
   }

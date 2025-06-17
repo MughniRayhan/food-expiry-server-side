@@ -116,18 +116,21 @@ app.post('/foods/:id/notes', async (req, res) => {
 
 
 // sorted nearly expiry date
-app.get('/nearly-expiry', async(req,res)=>{
- const today = new Date();
- const fiveDaysLater = new Date();
- fiveDaysLater.setDate(today.getDate() + 5);
- const result = await foodCollection.find({
-  expirydate:{
-    $gte: today.toISOString().split('T')[0],
-    $lte: fiveDaysLater.toISOString().split('T')[0],
-  }
- })
- .sort({expirydate:1}).toArray();
- res.send(result);
+app.get('/nearly-expiry', async (req, res) => {
+  const today = new Date();
+  const fiveDaysLater = new Date();
+  fiveDaysLater.setDate(today.getDate() + 5);
+
+  const result = await foodCollection.find({
+    expirydate: {
+      $gte: today,
+      $lte: fiveDaysLater,
+    }
+  })
+  .sort({ expirydate: 1 })
+  .toArray();
+
+  res.send(result);
 });
 
   } finally {

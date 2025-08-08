@@ -21,7 +21,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     const foodCollection = client.db("foodExpiryDB").collection("food");
 
     // foods api
@@ -129,6 +129,21 @@ app.get('/nearly-expiry', async(req,res)=>{
  .sort({expirydate:1}).toArray();
  res.send(result);
 });
+
+// wasted food (expired)
+app.get('/wasted-food', async (req, res) => {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const result = await foodCollection.find({
+      expirydate: { $lt: today }
+    }).sort({ expirydate: -1 }).toArray();
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch wasted food.' });
+  }
+});
+
 
   } finally {
     

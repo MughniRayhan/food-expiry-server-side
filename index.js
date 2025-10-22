@@ -3,11 +3,18 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const admin = require("firebase-admin");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+     
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.iuxl4dg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -22,7 +29,108 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
-    const foodCollection = client.db("foodExpiryDB").collection("food");
+    const db = client.db("foodExpiryDB");
+    const foodCollection = db.collection("food");
+    const usersCollection = db.collection("users");
+
+    // middleware to verify token
+    const verifyFbToken = async(req,res,next)=>{
+    const authHeaders = req.headers.authorization;
+    if(!authHeaders){
+      return res.status(401).send({message: "unauthorized access"})
+    }
+
+    const token = authHeaders.split(' ')[1];
+    if(!token){
+      return res.status(401).send({message: "unauthorized access"})
+    }
+      try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    req.decoded = decodedToken;
+    next();
+  } catch (error) {
+    res.status(403).send({ message: "Forbidden access" });
+  }
+  }
+
+  // varify admin role
+  const verifyAdmin = async (req, res, next) => {
+  const email = req.decoded.email;
+  if (!email) return res.status(401).send({ message: "Unauthorized" });
+
+  try {
+    const user = await usersCollection.findOne({ email });
+    if(!user || user.role !== 'admin'){
+      return res.status(403).send({message: "Forbidden accesss"})
+    }
+    next();
+  } catch (error) {
+    console.error("Error fetching user role:", error);
+    res.status(500).send({ message: "Failed to fetch user role" });
+  }
+};
+
+// Get all users or search by name/email
+app.get('/users', verifyFbToken, verifyAdmin, async (req, res) => {
+  const search = req.query.search;
+  let query = {};
+
+  if (search) {
+    query = {
+      $or: [
+        { displayName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } }
+      ]
+    };
+  }
+
+  try {
+    const users = await usersCollection.find(query).toArray();
+    res.send(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).send({ message: "Failed to fetch users" });
+  }
+});
+
+// GET user role by email 
+app.get('/users/role/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    if (!email) {
+      return res.status(400).send({ message: "Email parameter is required" });
+    }
+    const user = await usersCollection.findOne(
+      { email }
+    );
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+    res.send({ role: user.role || "user" }); 
+  } catch (error) {
+    console.error("Error fetching user role:", error);
+    res.status(500).send({ message: "Failed to get user role" });
+  }
+});
+
+// Save new user to DB if not exists
+app.post("/users", async (req, res) => {
+  try {
+    const user = req.body;
+    const existingUser = await usersCollection.findOne({ email: user.email });
+
+    if (existingUser) {
+      return res.send({ message: "User already exists", inserted: false });
+    }
+
+    const result = await usersCollection.insertOne(user);
+    res.status(201).send({ message: "User created", inserted: true, result });
+  } catch (error) {
+    console.error("Error saving user:", error);
+    res.status(500).send({ message: "Failed to save user" });
+  }
+});
+
 
     // foods api
     app.get('/foods', async (req, res) => {

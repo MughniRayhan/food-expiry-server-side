@@ -3,9 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const axios = require('axios');
 const admin = require("firebase-admin");
 const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
 const serviceAccount = JSON.parse(decoded);
+
 const port = process.env.PORT || 3000;
 
 app.use(cors());
@@ -128,6 +130,39 @@ app.post("/users", async (req, res) => {
   } catch (error) {
     console.error("Error saving user:", error);
     res.status(500).send({ message: "Failed to save user" });
+  }
+});
+
+app.patch("/users/:id", verifyFbToken,verifyAdmin, async (req, res) => {
+  const id = req.params.id;
+  const { role } = req.body;
+  const filter = { _id: new ObjectId(id) };
+  const updateDoc = { $set: { role } };
+  const result = await usersCollection.updateOne(filter, updateDoc);
+  res.send(result);
+});
+
+// Update user profile (name, photo)
+app.put('/users/profile/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { displayName, photoURL } = req.body;
+
+    if (!email) return res.status(400).send({ message: "Email required" });
+
+    const filter = { email };
+    const updateDoc = {
+      $set: {
+        displayName,
+        photoURL,
+      },
+    };
+
+    const result = await usersCollection.updateOne(filter, updateDoc);
+    res.status(200).send({ message: "Profile updated successfully", result });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).send({ message: "Failed to update profile" });
   }
 });
 

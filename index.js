@@ -73,28 +73,55 @@ async function run() {
   }
 };
 
-// Get all users or search by name/email
+// Get all users (exclude current admin) or search by name/email
 app.get('/users', verifyFbToken, verifyAdmin, async (req, res) => {
-  const search = req.query.search;
-  let query = {};
+  try {
+    const search = req.query.search?.trim();
+    const currentAdminEmail = req.decoded?.email; // ✅ use decoded
+    if (!currentAdminEmail) {
+      return res.status(401).send({ message: "Unauthorized: no admin info" });
+    }
 
-  if (search) {
-    query = {
-      $or: [
+    // Base query: exclude current admin
+    let query = { email: { $ne: currentAdminEmail } };
+
+    // Add search conditions if search exists
+    if (search) {
+      query.$or = [
         { displayName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } }
-      ]
-    };
-  }
+      ];
+    }
 
-  try {
-    const users = await usersCollection.find(query).toArray();
+    // Fetch users sorted by newest first
+    const users = await usersCollection.find(query).sort({ _id: -1 }).toArray();
+
     res.send(users);
   } catch (error) {
     console.error("Error fetching users:", error);
     res.status(500).send({ message: "Failed to fetch users" });
   }
 });
+
+
+
+// Ban / Unban user
+app.patch('/users/:id/status', verifyFbToken, verifyAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body; // 'active' or 'banned'
+
+  try {
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+    res.json(result);
+  } catch (error) {
+    console.error("Error updating user status:", error);
+    res.status(500).json({ message: "Failed to update user status" });
+  }
+});
+
 
 // GET user role by email 
 app.get('/users/role/:email', async (req, res) => {
@@ -168,34 +195,41 @@ app.put('/users/profile/:email', async (req, res) => {
 });
 
 
-    // foods api
-    app.get('/foods', async (req, res) => {
-      const cursor = foodCollection.find();
-      const result = await cursor.toArray();
-      res.send(result);
-    });
+   // foods api - show all foods sorted by addedDate (newest first)
+app.get('/foods', async (req, res) => {
+  try {
+    const cursor = foodCollection.find().sort({ addedDate: -1 }); // newest first
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
-    // search
-    app.get('/foods/search', async (req, res) => {
+// search api - also sort by addedDate descending
+app.get('/foods/search', async (req, res) => {
   const { q } = req.query;
   const query = q?.trim();
 
-  if (!query) {
-    return res.status(400).json({ error: 'Search query required' });
-  }
   try {
-    const results = await foodCollection.find({
-      $or: [
-        { title: { $regex: query, $options: 'i' } },
-        { category: { $regex: query, $options: 'i' } }
-      ]
-    }).toArray();
-
+    let results;
+    if (!query) {
+      // if search input is empty, return all items sorted
+      results = await foodCollection.find().sort({ addedDate: -1 }).toArray();
+    } else {
+      results = await foodCollection.find({
+        $or: [
+          { title: { $regex: query, $options: 'i' } },
+          { category: { $regex: query, $options: 'i' } }
+        ]
+      }).sort({ addedDate: -1 }).toArray();
+    }
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // food details
      app.get('/foods/:id', async (req, res) => {
@@ -467,25 +501,34 @@ app.get("/notifications/:email", async (req, res) => {
   try {
     const { email } = req.params;
 
-    const today = new Date().toISOString().split("T")[0];
+    // Today in YYYY-MM-DD format
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
+
+    // Five days later
     const fiveDaysLater = new Date();
-    fiveDaysLater.setDate(new Date().getDate() + 5);
+    fiveDaysLater.setDate(today.getDate() + 5);
+    const fiveDaysLaterStr = fiveDaysLater.toISOString().split("T")[0];
+
+    // Find nearly expiring foods (within next 5 days)
     const nearlyExpiring = await foodCollection.find({
       email,
-      expirydate: { $gte: today, $lte: fiveDaysLater },
+      expirydate: { $gte: todayStr, $lte: fiveDaysLaterStr },
     }).toArray();
 
+    // Find wasted/expired foods
     const wastedFoods = await foodCollection.find({
       email,
-      expirydate: { $lt: today },
+      expirydate: { $lt: todayStr },
     }).toArray();
 
-    // Optional: notify when new AI recipes were generated for user
+    // Find recent AI recipes
     const recentRecipes = await recipesCollection.find({ userEmail: email })
       .sort({ createdAt: -1 })
       .limit(3)
       .toArray();
 
+    // Combine all notifications
     const notifications = [];
 
     nearlyExpiring.forEach(f => notifications.push({
@@ -506,15 +549,17 @@ app.get("/notifications/:email", async (req, res) => {
       date: r.createdAt,
     }));
 
-    // Sort notifications by date descending
+    // Sort notifications by date descending (most recent first)
     notifications.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     res.json(notifications);
+
   } catch (error) {
     console.error("Error fetching notifications:", error);
     res.status(500).json({ message: "Failed to fetch notifications" });
   }
 });
+
 
 
   } finally {

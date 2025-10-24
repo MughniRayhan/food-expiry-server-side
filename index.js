@@ -462,6 +462,59 @@ app.get("/recipes/:email", async (req, res) => {
   res.json(recipes);
 });
 
+// Notifications API
+app.get("/notifications/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const today = new Date().toISOString().split("T")[0];
+    const fiveDaysLater = new Date();
+    fiveDaysLater.setDate(new Date().getDate() + 5);
+    const nearlyExpiring = await foodCollection.find({
+      email,
+      expirydate: { $gte: today, $lte: fiveDaysLater },
+    }).toArray();
+
+    const wastedFoods = await foodCollection.find({
+      email,
+      expirydate: { $lt: today },
+    }).toArray();
+
+    // Optional: notify when new AI recipes were generated for user
+    const recentRecipes = await recipesCollection.find({ userEmail: email })
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .toArray();
+
+    const notifications = [];
+
+    nearlyExpiring.forEach(f => notifications.push({
+      type: "warning",
+      message: `"${f.title}" will expire on ${f.expirydate}`,
+      date: f.expirydate,
+    }));
+
+    wastedFoods.forEach(f => notifications.push({
+      type: "error",
+      message: `"${f.title}" has expired on ${f.expirydate}`,
+      date: f.expirydate,
+    }));
+
+    recentRecipes.forEach(r => notifications.push({
+      type: "info",
+      message: `New AI recipe added: "${r.title}"`,
+      date: r.createdAt,
+    }));
+
+    // Sort notifications by date descending
+    notifications.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json(notifications);
+  } catch (error) {
+    console.error("Error fetching notifications:", error);
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+});
 
 
   } finally {

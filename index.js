@@ -272,7 +272,6 @@ app.get('/nearly-expiry', async(req,res)=>{
  .sort({expirydate:1}).toArray();
  res.send(result);
 });
-
 // wasted food (expired)
 app.get('/wasted-food', async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
@@ -286,6 +285,80 @@ app.get('/wasted-food', async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch wasted food.' });
   }
 });
+
+
+// AI Tip Generator Endpoint
+app.post("/ai-tip", async (req, res) => {
+  const { foodName, expiryDate } = req.body;
+
+  if (!foodName || !expiryDate) {
+    return res.status(400).json({ message: "Food name and expiry date are required." });
+  }
+
+  // Helper function for retrying the request
+  const fetchAiTip = async (retryCount = 2) => {
+    try {
+      const response = await axios.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          model: "openai/gpt-4o-mini:free",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a helpful assistant that gives short, practical tips about food storage and reducing food waste.",
+            },
+            {
+              role: "user",
+              content: `Give a short one-line tip for keeping "${foodName}" fresh. It expires on ${expiryDate}.`,
+            },
+          ],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 8000, // 8 seconds timeout
+        }
+      );
+
+      return response.data?.choices?.[0]?.message?.content || null;
+    } catch (error) {
+      if (retryCount > 0) {
+        console.warn(`⚠️ Retry left: ${retryCount} — Retrying AI tip fetch...`);
+        return await fetchAiTip(retryCount - 1);
+      } else {
+        console.error("❌ AI Tip generation failed after retries:", error.message);
+        return null;
+      }
+    }
+  };
+
+  const aiTip = await fetchAiTip();
+
+  if (aiTip) {
+    res.json({ tip: aiTip });
+  } else {
+    // Fallback tips when AI is unavailable
+    const fallbackTips = [
+      `Store "${foodName}" in an airtight container to extend freshness.`,
+      `Keep "${foodName}" in a cool, dry place away from sunlight.`,
+      `Check "${foodName}" regularly and use it before the expiry date.`,
+      `Freeze "${foodName}" if you can’t use it soon.`,
+      `Keep "${foodName}" sealed tightly to prevent moisture and odor absorption.`,
+    ];
+    const randomTip = fallbackTips[Math.floor(Math.random() * fallbackTips.length)];
+
+    res.json({
+      tip: randomTip,
+      fallback: true,
+      message: "AI service is currently unavailable. Showing a quick storage tip instead.",
+    });
+  }
+});
+
+
 
 
   } finally {

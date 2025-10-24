@@ -34,6 +34,7 @@ async function run() {
     const db = client.db("foodExpiryDB");
     const foodCollection = db.collection("food");
     const usersCollection = db.collection("users");
+    const recipesCollection = db.collection("recipes");
 
     // middleware to verify token
     const verifyFbToken = async(req,res,next)=>{
@@ -358,6 +359,108 @@ app.post("/ai-tip", async (req, res) => {
   }
 });
 
+// ------------------- AI Recipe Generator and Saver -------------------
+app.post("/ai-recipe", async (req, res) => {
+  const { ingredients, userEmail } = req.body;
+
+  if (!ingredients || !Array.isArray(ingredients) || ingredients.length === 0) {
+    return res.status(400).json({ message: "Ingredients array is required." });
+  }
+
+  if (!userEmail) {
+    return res.status(400).json({ message: "User email required to save recipe." });
+  }
+
+
+  const ingredientList = ingredients.join(", ");
+
+  const fetchAiRecipe = async (retryCount = 2) => {
+    try {
+      const response = await axios.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an expert chef AI. Respond only in valid JSON. Give short, clear, healthy recipe suggestions.",
+            },
+            {
+              role: "user",
+              content: `Generate a creative, easy recipe using these ingredients: ${ingredientList}. 
+              Return JSON in format:
+              {"title":"Recipe name","ingredients":["list"],"instructions":["step 1","step 2",...]}`,
+            },
+          ],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 15000,
+        }
+      );
+
+      const raw = response.data?.choices?.[0]?.message?.content;
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      if (retryCount > 0) {
+        console.warn(`Retrying AI recipe fetch (${retryCount} left)...`);
+        return await fetchAiRecipe(retryCount - 1);
+      } else {
+        console.error("AI Recipe generation failed:", error.message);
+        return null;
+      }
+    }
+  };
+
+  const aiRecipe = await fetchAiRecipe();
+
+  if (aiRecipe) {
+    const recipeData = {
+      ...aiRecipe,
+      ingredients,
+      userEmail,
+      createdAt: new Date(),
+    };
+    await recipesCollection.insertOne(recipeData);
+    res.json({ ...aiRecipe, saved: true });
+  } else {
+    const fallback = {
+      title: "Quick Vegetable Stir-Fry",
+      ingredients,
+      instructions: [
+        "Chop all vegetables finely.",
+        "Heat oil, sauté vegetables, and season with salt & pepper.",
+        "Serve hot with rice or noodles.",
+      ],
+      fallback: true,
+      message: "AI unavailable — showing fallback recipe.",
+    };
+    await recipesCollection.insertOne({
+      ...fallback,
+      userEmail,
+      createdAt: new Date(),
+    });
+    res.json(fallback);
+  }
+});
+
+// ------------------- Fetch All Saved Recipes -------------------
+app.get("/recipes/:email", async (req, res) => {
+  const { email } = req.params;
+  const db = client.db("foodExpiryDB");
+  const recipesCollection = db.collection("recipes");
+
+  const recipes = await recipesCollection
+    .find({ userEmail: email })
+    .sort({ createdAt: -1 })
+    .toArray();
+
+  res.json(recipes);
+});
 
 
 
